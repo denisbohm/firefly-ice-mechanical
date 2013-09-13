@@ -134,16 +134,17 @@ class Path:
 class FireflyIceBlue:
 
     def __init__(self):
-        self.coreInnerRadius = 17.9
+        self.coreInnerRadius = 18.4
         self.coreShellWidth = 1.1
         self.coreShellHeight = 7.05
         self.coreTopExtension = 0.7
-        self.coreSpacerLedgeWidth = 0.7
+        self.coreTopOverlap = 0.8
+        self.coreSpacerLedgeWidth = 0.6
         self.coreSpacerLedgeHeight = 0.9
         self.coreSpacerOuterHeight = 0.8
         self.coreSpacerInnerHeight = 1.0
         self.coreSpacerHeight = 0.8;
-        self.coreSpacerCapWidth = 1.4
+        self.coreSpacerCapWidth = 2.2
         self.coreCoverSlopeDepth = 0.2
         self.coreCoverSlopeHeight = 0.3
         self.coreCoverSpace = 0.4
@@ -246,11 +247,13 @@ class FireflyIceBlue:
         x = r * math.sin(a)
         y = r * math.cos(a)
         points = []
+        # yr = 18.1
+        yr = self.coreInnerRadius - self.coreSpacerLedgeWidth + 0.4
         points.append((-x, -y, z0))
-        points.append((-1.5, -17.7 - d, z0))
-        points.append((-0.8, -17.4 - d, z0))
-        points.append((0.8, -17.4 - d, z0))
-        points.append((1.5, -17.7 - d, z0))
+        points.append((-1.5, -yr - d, z0))
+        points.append((-0.8, -yr + 0.3 - d, z0))
+        points.append((0.8, -yr + 0.3 - d, z0))
+        points.append((1.5, -yr - d, z0))
         points.append((x, -y, z0))
         start_tangent = (y / r, -x / r, 0)
         end_tangent = (y / r, x / r, 0)
@@ -301,7 +304,7 @@ class FireflyIceBlue:
         path.LineTo(x4, y0)
         path.LineTo(x4 - self.GetDraftDistance(y0, y5), y5)
         path.CutInFillet(0.2)
-        path.LineTo(x0 + self.GetDraftDistance(y4, y5), y5)
+        path.LineTo(x0, y5)
         path.CutInFillet(0.2)
         path.LineTo(x0, y4)
         path.LineTo(x1, y4)
@@ -442,7 +445,7 @@ class FireflyIceBlue:
         y0 = 0
         y1 = y0 - self.pcbTopClearance
         y2 = y1 - self.pcbThickness
-        y4 = -self.postHeight + 0.1
+        y4 = -self.postHeight
         y3 = y4 + 0.2
         
         x2 = self.postMateInnerRadius
@@ -468,9 +471,9 @@ class FireflyIceBlue:
     def CreatePostHole(self):
         y0 = 0
         y2 = self.coreShellHeight - self.coreSpacerLedgeHeight - self.pcbTopClearance - self.pcbThickness - (self.coreCoverSlopeHeight + self.coreCoverSpace + self.corePressHeight)
-        y1 = y2 - self.postHeight + self.pcbThickness + self.pcbTopClearance
+        y1 = y2 - self.postHeight - 0.5 + self.pcbThickness + self.pcbTopClearance
         
-        x1 = self.postMateInnerRadius
+        x1 = self.postMateInnerRadius + self.tolerance
         x0 = x1 - self.GetDraftMinimumDistance(y1, y2)
         x3 = self.postMateOuterRadius
         x2 = x3 - self.GetDraftDistance(y0, y2)
@@ -596,9 +599,20 @@ class FireflyIceBlue:
         slot = rs.RotateObject(slot, (0, 0, 0), a, (0, 0, 1))
         return slot
 
+    def CreateULine(self, x0, x1, y0, y1, z):
+        r = 0.5
+        sp4 = r - math.sin(math.pi / 4) * r
+        return rs.JoinCurves([
+            rs.AddLine((x0, y1, z), (x0, y0 + r, z)),
+            rs.AddArc3Pt((x0, y0 + r, z), (x0 + r, y0, z), (x0 + sp4, y0 + sp4, z)),
+            rs.AddLine((x0 + r, y0, z), (x1 - r, y0, z)),
+            rs.AddArc3Pt((x1 - r, y0, z), (x1, y0 + r, z), (x1 - sp4, y0 + sp4, z)),
+            rs.AddLine((x1, y0 + r, z), (x1, y1, z))],
+            True)
+
     def CreateCoreSpacer(self):
         x2 = self.coreInnerRadius - self.tolerance
-        x1 = x2 - self.coreSpacerLedgeWidth - self.tolerance
+        x1 = x2 - self.coreSpacerLedgeWidth - self.coreTopOverlap
         x0 = x2 - self.coreSpacerCapWidth
         y1 = self.coreShellHeight - self.coreSpacerLedgeHeight
         y3 = y1 + self.coreSpacerOuterHeight
@@ -611,7 +625,7 @@ class FireflyIceBlue:
         path.LineTo(x2, y0)
         path.LineTo(x2 - self.GetDraftDistance(y0, y1), y1)
         path.LineTo(x1, y1)
-        path.LineTo(x1 - self.GetDraftDistance(y1, y3), y3)
+        path.LineTo(x1, y3)
         polysurface = path.RevolveSolid()
 
         if self.fourPartDesign:
@@ -685,10 +699,10 @@ class FireflyIceBlue:
         r1 = x2
         r0 = r1 - d
         circle0 = rs.AddCircle3Pt((-r0, 0, z0), (r0, 0, z0), (0, r0, z0))
-        edge0 = rs.AddLine((-10.0, self.usbPcbEdge + d, z0), (10, self.usbPcbEdge + d, z0))
+        edge0 = self.CreateULine(-6, +6, self.usbPcbEdge + d, self.usbPcbEdge + d + 3, z0)
         curve0 = self.CreateEdgeSupport(edge0, circle0)
         circle1 = rs.AddCircle3Pt((-r1, 0, z1), (r1, 0, z1), (0, r1, z1))
-        edge1 = rs.AddLine((-10.0, self.usbPcbEdge, z1), (10, self.usbPcbEdge, z1))
+        edge1 = self.CreateULine(-6, +6, self.usbPcbEdge, self.usbPcbEdge + 3, z1)
         curve1 = self.CreateEdgeSupport(edge1, circle1)
         support = self.CreateLoftAndCap(curve1, curve0)
         polysurface = self.Cut(polysurface, [support])
@@ -708,12 +722,16 @@ class FireflyIceBlue:
 
     def CreateCoreTop(self):
         x1 = self.coreInnerRadius - self.coreSpacerLedgeWidth - self.tolerance
+        xm = x1 - self.coreTopOverlap
         x0 = x1 - self.coreTopExtension
         y0 = self.coreShellHeight - self.coreSpacerLedgeHeight + self.coreSpacerOuterHeight
+        ym = y0 - self.coreSpacerOuterHeight
         y1 = self.coreShellHeight
         y2 = y1 + self.coreTopExtension
         path = Path()
-        path.MoveTo(x1 - self.GetDraftDistance(y0, y1), y0)
+        path.MoveTo(xm, y0)
+        path.LineTo(xm, ym)
+        path.LineTo(x1, ym)
         path.LineTo(x1, y1)
         path.LineTo(x1, y2)
         path.LineTo(x0, y2)
@@ -754,7 +772,13 @@ class FireflyIceBlue:
     
     def Create(self):
         now = datetime.now()
-        rs.Notes("Firefly Ice Blue Core Revision 1.4 WIP " + now.strftime('%Y-%m-%d %H:%M:%S') + "\n" +
+        rs.Notes("Firefly Ice Blue Core Revision 1.6 WIP " + now.strftime('%Y-%m-%d %H:%M:%S') + "\n" +
+                 "\n" +
+                 "Changes Since 1.5 WIP\n" +
+                 "- bring clear down over the side of the spacer to reduce chance of separation\n" +
+                 "\n" +
+                 "Changes Since 1.4 WIP\n" +
+                 "- added tolerance to post hole for post pin fit\n" +
                  "\n" +
                  "Changes Since 1.3 WIP\n" +
                  "- back to co-molded clear top and black spacer\n" +
