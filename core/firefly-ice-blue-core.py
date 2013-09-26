@@ -42,6 +42,57 @@ class PathXY:
         if len(self.curves) > 1:
             self.curves = rs.JoinCurves(self.curves, True)
 
+class PathXZ:
+    
+    def __init__(self):
+        self.firstPoint = None
+        self.currentPoint = None
+        self.curves = []
+        self.y = 0
+    
+    def BeginPath(self):
+        self.firstPoint = None
+        self.currentPoint = None
+        self.curves = []
+    
+    def MoveTo(self, a, b):
+        self.currentPoint = (a, self.y, b)
+        if self.firstPoint is None:
+            self.firstPoint = self.currentPoint
+    
+    def LineTo(self, a, b):
+        p = (a, self.y, b)
+        if p == self.currentPoint:
+            return
+        self.curves.append(rs.AddLine(self.currentPoint, p))
+        self.currentPoint = p
+    
+    def CutInFillet(self, radius):
+        curve1 = self.curves.pop()
+        curve0 = self.curves.pop()
+        curve = rs.AddFilletCurve(curve0, curve1, radius, self.currentPoint, self.currentPoint)
+        fillet = rs.CurveFilletPoints(curve0, curve1, radius)
+        p0 = fillet[0]
+        p1 = fillet[1]
+        pc = fillet[2]
+        self.curves.append(rs.AddLine(rs.CurveStartPoint(curve0), p0))
+        self.curves.append(curve)
+        self.curves.append(rs.AddLine(p1, rs.CurveEndPoint(curve1)))
+        rs.DeleteObject(curve0)
+        rs.DeleteObject(curve1)
+    
+    def ClosePath(self):
+        self.curves.append(rs.AddLine(self.currentPoint, self.firstPoint))
+    
+    def Shift(self):
+        curve = self.curves[0]
+        self.curves[0:1] = []
+        self.curves.append(curve)
+    
+    def Join(self):
+        if len(self.curves) > 1:
+            self.curves = rs.JoinCurves(self.curves, True)
+
 class Path:
 
     def __init__(self):
@@ -154,6 +205,7 @@ class FireflyIceBlue:
         self.corePressHeight = 0.5
         self.pcbTopClearance = 1.0
         self.pcbThickness = 0.9
+        self.pcbRadius = 17.0
         self.postHeight = 4.0
         self.postSupportRadius = 1.8
         self.postRadius = 0.8
@@ -173,11 +225,15 @@ class FireflyIceBlue:
         self.draftMinimumAngle = 1.5
         self.tolerance = 0.05
         self.fourPartDesign = False
+        
+        self.clipLipHeight = 1.65
+        self.clipLipThickness = 2.5
 
         self.coreShell = None
         self.coreBack = None
         self.coreSpacer = None
         self.coreTop = None
+        self.clip = None
 
         self.root = "/Users/denis/sandbox/denisbohm/firefly-ice-mechanical/core/"
 
@@ -233,6 +289,22 @@ class FireflyIceBlue:
             object = objects[meta[i][0]]
             rs.DeleteObject(object)
         return objects[meta[len(meta) - 1][0]]
+    
+    def SplitAndKeepSmallest(self, object, cutting):
+        objects = rs.SplitBrep(object, cutting, True)
+        # sort split object parts by surface area
+        meta = [(i, rs.SurfaceArea(objects[i])[0]) for i in range(len(objects))]
+        meta.sort(key=lambda iy: -iy[1])
+        # delete other parts
+        for i in range(len(meta) - 1):
+            object = objects[meta[i][0]]
+            rs.DeleteObject(object)
+        return objects[meta[len(meta) - 1][0]]
+    
+    def Fuse(self, a, b):
+        sa = self.SplitAndKeepLargest(a, b)
+        sb = self.SplitAndKeepLargest(b, sa)
+        return rs.JoinSurfaces([sa, sb], True)
     
     def Keep(self, curves, index, axis=1):
         meta = [(i, rs.CurveMidPoint(curves[i])[axis]) for i in range(len(curves))]
@@ -556,7 +628,7 @@ class FireflyIceBlue:
             a0 = section[0] * math.pi / 180
             a1 = section[1] * math.pi / 180
             r1 = self.coreInnerRadius - tolerance
-            r0 = r1 - 1.4
+            r0 = self.pcbRadius - 0.6
             support = self.CreateSupportArc(a0, a1, r0, r1, y6, y7)
             polysurface = self.Cut(polysurface, [support])
 
@@ -770,33 +842,178 @@ class FireflyIceBlue:
         p6 = box[6]
         return p6[0] - p0[0]
     
+    def CreateClip(self):
+        milling = False
+
+        y0 = 0
+        y1 = self.coreShellHeight
+        y2 = self.coreShellHeight + self.clipLipHeight
+        x0 = self.coreInnerRadius - self.coreSpacerLedgeWidth
+        x1 = self.coreInnerRadius + self.coreShellWidth + self.tolerance
+        x2 = x1 + self.GetDraftDistance(y0, y1)
+        x4 = x2 + self.clipLipThickness
+        x3 = x4 - self.GetDraftDistance(y0, y2)
+        path = Path()
+        path.MoveTo(x0, y1)
+        path.LineTo(x1, y1)
+        path.LineTo(x2, y0)
+        path.LineTo(x4, y0)
+        path.LineTo(x3, y2)
+        path.LineTo(x0, y2)
+        path.CutInFillet(0.6)
+        path.ClosePath()
+        polysurface = path.Revolve()
+        
+        if milling:
+            # cut a slot for milling to reach spring from top
+            curve = rs.AddLine((x1, 0, y1), (x1, 0, y2))
+            cut1 = rs.AddRevSrf(curve, ((0, 0, 0), (0, 0, 1)), -25, 25)
+            rs.DeleteObject(curve)
+            box = rs.BoundingBox(cut1)
+            xa = box[0][0]
+            ya = box[0][1]
+            xb = box[3][0]
+            yb = box[3][1]
+            cut2 = rs.MirrorObject(cut1, (0, -1, 0), (0, 1, 0), True)
+            side1 = self.CreateRect([(xa, ya, y1), (xa, ya, y2), (-xa, ya, y2), (-xa, ya, y1)])
+            side1s = self.SplitAndKeep(side1, polysurface, [0, 2], 0)
+            side2 = self.CreateRect([(xb, yb, y1), (xb, yb, y2), (-xb, yb, y2), (-xb, yb, y1)])
+            side2s = self.SplitAndKeep(side2, polysurface, [0, 2], 0)
+            cut1 = rs.JoinSurfaces([cut1, side1s[1], side2s[1]], True)
+            cut2 = rs.JoinSurfaces([cut2, side1s[0], side2s[0]], True)
+            polysurface = self.SplitAndKeep(polysurface, cut1, 0, 0)
+            polysurface = self.SplitAndKeep(polysurface, cut2, 1, 0)
+            polysurface = rs.JoinSurfaces([polysurface, cut1, cut2], True)
+        
+        cx1 = x1
+        cx2 = x2
+        cy0 = y0
+        cy1 = y1
+        
+        armWidth = 8
+        # cut entry side
+        r = x4
+        d = x2 - math.sqrt(x2 * x2 - (armWidth / 2) * (armWidth / 2))
+        e = x2 - d
+        path = PathXZ()
+        path.y = -r
+        path.MoveTo(-12, 0)
+        path.LineTo(-10, 0)
+        path.LineTo(-5, 5)
+        path.CutInFillet(2)
+        path.LineTo(r, 5)
+        path.CutInFillet(2)
+        path.Join()
+        curve = path.curves[0]
+        extrusion = rs.ExtrudeCurveStraight(curve, (0, -r, 0), (0, r, 0))
+        rs.DeleteObject(curve)
+        extrusion = self.SplitAndKeep(extrusion, polysurface, 1, 0)
+        polysurface = self.SplitAndKeepLargest(polysurface, extrusion)
+        polysurface = rs.JoinSurfaces([polysurface, extrusion], True)
+
+        flatThickness = 2.5
+        armInset = -1.2
+        if milling:
+            flatThickness = 1.5
+            armInset = 3
+        x2 = -e
+        x0 = x2 - 3.2
+        x1 = x2 - 2
+        x3 = x2 + 7
+        x4 = x2 + 10
+        x8 = self.coreInnerRadius - armInset
+        x7 = x8 - 2
+        x6 = x7 - 2
+        x5 = x6 - 0.1
+        y0 = -2 - flatThickness
+        y1 = -2
+        y2 = -2
+        y3 = -1
+        y4 = 2
+        y5 = 0
+        y6 = 2
+        y7 = 7
+        path = PathXZ()
+        path.y = -4
+        path.MoveTo(x0, y0)
+        path.LineTo(x4, y0)
+        path.LineTo(x8, y3)
+        path.CutInFillet(2)
+        path.LineTo(x7, y4)
+#        path.CutInFillet(0.2)
+        path.LineTo(x6, y4 - 0.2)
+        path.CutInFillet(0.2)
+        path.LineTo(x5, y4 - 1.5)
+        path.LineTo(x3, y2)
+        path.LineTo(x2, y2)
+        path.CutInFillet(2)
+        path.LineTo(x2, y7)
+        path.CutInFillet(0.8)
+        path.LineTo(x0, y7)
+        path.ClosePath()
+        path.CutInFillet(2)
+        path.Shift()
+        path.CutInFillet(2)
+        path.Join()
+        curve = path.curves[0]
+        extrusion = rs.ExtrudeCurveStraight(curve, (0, 0, 0), (0, 8, 0))
+        end0 = rs.AddPlanarSrf([curve])
+        end1 = rs.AddPlanarSrf([curve])
+        rs.MoveObject(end1, (0, 8, 0))
+        rs.DeleteObject(curve)
+        spring = rs.JoinSurfaces([end0, extrusion, end1], True)
+        # cut out arm clearance for core
+        path = Path()
+        path.MoveTo(cx1, cy1)
+        path.LineTo(cx2, cy0 - 0.2)
+        curve = path.curves[0]
+        cutout = path.RevolveSolid(True, True)
+        line = rs.AddLine((5, -50, -10), (5, +50, -10))
+        knife = rs.ExtrudeCurveStraight(line, (0, 0, 0), (0, 0, 20))
+        cutout = self.SplitAndKeepLargest(cutout, knife)
+        rs.DeleteObjects([line, knife])
+        cutout = self.SplitAndKeepSmallest(cutout, spring)
+        spring = self.SplitAndKeepLargest(spring, cutout)
+        spring = rs.JoinSurfaces([spring, cutout], True)
+        #
+        polysurface = self.Fuse(polysurface, spring)
+
+        self.clip = polysurface
+        self.CreateLayer("clip", 0xff00ff, polysurface)
+    
+    def CreateClipTop(self):
+        y0 = 0
+        y1 = self.coreShellHeight
+        y2 = self.coreShellHeight + self.clipLipThickness
+        x0 = self.coreInnerRadius - self.coreSpacerLedgeWidth
+        x1 = self.coreInnerRadius + self.coreShellWidth + self.tolerance
+        x2 = x1 + self.GetDraftDistance(y0, y1)
+        x4 = x2 + self.clipLipThickness
+        x3 = x4 - self.GetDraftDistance(y0, y2)
+        path = Path()
+        path.MoveTo(x0, y1)
+        path.LineTo(x1, y1)
+        path.LineTo(x2, y0)
+        path.LineTo(x4, y0)
+        path.LineTo(x3, y2)
+        path.LineTo(x0, y2)
+        path.ClosePath()
+        polysurface = path.Revolve()
+        
+        self.clip = polysurface
+        self.CreateLayer("clip", 0xff00ff, polysurface)
+    
     def Create(self):
         now = datetime.now()
-        rs.Notes("Firefly Ice Blue Core Revision 1.6 WIP " + now.strftime('%Y-%m-%d %H:%M:%S') + "\n" +
+        rs.Notes("Firefly Ice Blue Core Revision 1.7 WIP " + now.strftime('%Y-%m-%d %H:%M:%S') + "\n" +
                  "\n" +
-                 "Changes Since 1.5 WIP\n" +
-                 "- bring clear down over the side of the spacer to reduce chance of separation\n" +
-                 "\n" +
-                 "Changes Since 1.4 WIP\n" +
-                 "- added tolerance to post hole for post pin fit\n" +
-                 "\n" +
-                 "Changes Since 1.3 WIP\n" +
-                 "- back to co-molded clear top and black spacer\n" +
-                 "\n" +
-                 "Changes Since 1.2 WIP\n" +
-                 "- spacer is now clear and top is now colored\n" +
-                 "- added light barriers between close LEDS\n" +
-                 "\n" +
-                 "Changes Since 1.1 WIP\n" +
-                 "- start adding draft\n" +
-                 "- add anti-squish supports to back\n" +
-                 "- add core cutout for antenna clearance\n" +
-                 "- increase size of USB opening for plug retention feature clearance\n" +
-                 "- make shape of shell alignment key / hole millable\n")
-        self.CreateCoreTop()
-        self.CreateCoreSpacer()
-        self.CreateCoreShell()
-        self.CreateCoreBack()
+                 "Changes Since 1.6 REL\n" +
+                 "- add clip\n")
+        self.CreateClip();
+#        self.CreateCoreTop()
+#        self.CreateCoreSpacer()
+#        self.CreateCoreShell()
+#        self.CreateCoreBack()
 
 if __name__ == '__main__':
     fireflyIceBlue = FireflyIceBlue()
