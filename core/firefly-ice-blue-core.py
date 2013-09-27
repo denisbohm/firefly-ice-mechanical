@@ -864,27 +864,6 @@ class FireflyIceBlue:
         path.ClosePath()
         polysurface = path.Revolve()
         
-        if milling:
-            # cut a slot for milling to reach spring from top
-            curve = rs.AddLine((x1, 0, y1), (x1, 0, y2))
-            cut1 = rs.AddRevSrf(curve, ((0, 0, 0), (0, 0, 1)), -25, 25)
-            rs.DeleteObject(curve)
-            box = rs.BoundingBox(cut1)
-            xa = box[0][0]
-            ya = box[0][1]
-            xb = box[3][0]
-            yb = box[3][1]
-            cut2 = rs.MirrorObject(cut1, (0, -1, 0), (0, 1, 0), True)
-            side1 = self.CreateRect([(xa, ya, y1), (xa, ya, y2), (-xa, ya, y2), (-xa, ya, y1)])
-            side1s = self.SplitAndKeep(side1, polysurface, [0, 2], 0)
-            side2 = self.CreateRect([(xb, yb, y1), (xb, yb, y2), (-xb, yb, y2), (-xb, yb, y1)])
-            side2s = self.SplitAndKeep(side2, polysurface, [0, 2], 0)
-            cut1 = rs.JoinSurfaces([cut1, side1s[1], side2s[1]], True)
-            cut2 = rs.JoinSurfaces([cut2, side1s[0], side2s[0]], True)
-            polysurface = self.SplitAndKeep(polysurface, cut1, 0, 0)
-            polysurface = self.SplitAndKeep(polysurface, cut2, 1, 0)
-            polysurface = rs.JoinSurfaces([polysurface, cut1, cut2], True)
-        
         cx1 = x1
         cx2 = x2
         cy0 = y0
@@ -911,11 +890,11 @@ class FireflyIceBlue:
         polysurface = self.SplitAndKeepLargest(polysurface, extrusion)
         polysurface = rs.JoinSurfaces([polysurface, extrusion], True)
 
+        # arm
         flatThickness = 2.5
-        armInset = -1.2
+        armInset = 2.5
         if milling:
             flatThickness = 1.5
-            armInset = 3
         x2 = -e
         x0 = x2 - 3.2
         x1 = x2 - 2
@@ -962,21 +941,34 @@ class FireflyIceBlue:
         rs.MoveObject(end1, (0, 8, 0))
         rs.DeleteObject(curve)
         spring = rs.JoinSurfaces([end0, extrusion, end1], True)
-        # cut out arm clearance for core
-        path = Path()
-        path.MoveTo(cx1, cy1)
-        path.LineTo(cx2, cy0 - 0.2)
-        curve = path.curves[0]
-        cutout = path.RevolveSolid(True, True)
-        line = rs.AddLine((5, -50, -10), (5, +50, -10))
-        knife = rs.ExtrudeCurveStraight(line, (0, 0, 0), (0, 0, 20))
-        cutout = self.SplitAndKeepLargest(cutout, knife)
-        rs.DeleteObjects([line, knife])
-        cutout = self.SplitAndKeepSmallest(cutout, spring)
-        spring = self.SplitAndKeepLargest(spring, cutout)
-        spring = rs.JoinSurfaces([spring, cutout], True)
-        #
+        
         polysurface = self.Fuse(polysurface, spring)
+        
+        # cut milling slot
+        y0 = -0.2
+        y2 = self.coreShellHeight + self.clipLipHeight
+        x1 = self.coreInnerRadius + self.coreShellWidth + self.tolerance
+        x2 = x1 + self.GetDraftDistance(0, self.coreShellHeight)
+        curve = rs.AddLine((x2, 0, y0), (x2, 0, y2))
+        cut = rs.AddRevSrf(curve, ((0, 0, 0), (0, 0, 1)), 180 - 16, 180 + 16)
+        rs.DeleteObject(curve)
+        box = rs.BoundingBox(cut)
+        xa = box[0][0]
+        ya = box[0][1]
+        xb = box[3][0]
+        yb = box[3][1]
+        side1 = self.CreateRect([(xa, ya, y0), (xa, ya, y2), (-xa, ya, y2), (-xa, ya, y0)])
+        side1 = self.SplitAndKeep(side1, polysurface, 0, 0)
+        side1 = self.SplitAndKeep(side1, cut, 1, 0)
+        side2 = self.CreateRect([(xb, yb, y0), (xb, yb, y2), (-xb, yb, y2), (-xb, yb, y0)])
+        side2 = self.SplitAndKeep(side2, polysurface, 0, 0)
+        side2 = self.SplitAndKeep(side2, cut, 1, 0)
+        bottom = self.CreateRect([(xa, ya, y0), (xa, yb, y0), (-15, yb, y0), (-15, ya, y0)])
+        bottom = self.SplitAndKeep(bottom, cut, 2, 0)
+        cut = rs.JoinSurfaces([cut, side1, side2, bottom], True)
+        cut = self.SplitAndKeepLargest(cut, polysurface)
+        polysurface = self.SplitAndKeepLargest(polysurface, cut)
+        polysurface = rs.JoinSurfaces([polysurface, cut], True)
 
         self.clip = polysurface
         self.CreateLayer("clip", 0xff00ff, polysurface)
