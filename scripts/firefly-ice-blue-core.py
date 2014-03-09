@@ -235,7 +235,7 @@ class FireflyIceBlue:
         self.coreTop = None
         self.clip = None
 
-        self.root = "/Users/denis/sandbox/denisbohm/firefly-ice-mechanical/core/"
+        self.root = ""
 
     def CreateLayer(self, name, color, surface):
         rs.AddLayer(name, color)
@@ -1001,11 +1001,11 @@ class FireflyIceBlue:
                  "\n" +
                  "Changes Since 1.6 REL\n" +
                  "- add clip\n")
-        self.CreateClip();
-#        self.CreateCoreTop()
-#        self.CreateCoreSpacer()
-#        self.CreateCoreShell()
-#        self.CreateCoreBack()
+#        self.CreateClip();
+        self.CreateCoreTop()
+        self.CreateCoreSpacer()
+        self.CreateCoreShell()
+        self.CreateCoreBack()
 
 if __name__ == '__main__':
     fireflyIceBlue = FireflyIceBlue()

@@ -1,6 +1,6 @@
 import rhinoscriptsyntax as rs
 
-root = "/Users/denis/sandbox/denisbohm/firefly-ice-mechanical/core/"
+root = ""
 
 boardThickness = 1.6
 
