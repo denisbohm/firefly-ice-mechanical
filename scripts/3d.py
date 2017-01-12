@@ -89,7 +89,7 @@ def CreateRoundedRectangle(x0, y0, x1, y1, z0, r=0.5):
     return path.curves[0]
 
 def PlaceInstance(file, x, y, mirror, rotate):
-    rs.Command("_-Insert _File=_Yes /Users/denis/sandbox/denisbohm/firefly-ice-thingiverse/packages/" + file + ".3dm B 0,0,0 1 0 _Enter")
+    rs.Command("_-Insert _File=_Yes /Users/denis/sandbox/denisbohm/firefly-ice-mechanical/scripts/packages/" + file + ".3dm B 0,0,0 1 0 _Enter")
     objects = rs.SelectedObjects()
     if not len(objects):
         return None
